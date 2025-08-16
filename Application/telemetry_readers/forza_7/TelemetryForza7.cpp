@@ -1,7 +1,5 @@
 #include "TelemetryForza7.hpp"
 #include <iostream>
-#include <thread>
-#include <atomic>
 #include <cstring>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -9,7 +7,10 @@
 
 // Constructor
 TelemetryForza7::TelemetryForza7()
-    : telemetryListener(nullptr)
+    : telemetryListener(nullptr),
+    running(false),
+    lastGear(0),
+    lastAbsState(false) 
 {
     // Initialization code here
 }
@@ -40,8 +41,8 @@ bool TelemetryForza7::configureTelemetry(ISimTelemetry* listener, std::string te
             std::cerr << "Telemetry source must be in format ip:port" << std::endl;
             return false;
         }
-        sourceIp = telemetrySource.substr(0, colon);
-        sourcePort = std::stoi(telemetrySource.substr(colon + 1));
+        auto sourceIp = telemetrySource.substr(0, colon);
+        auto sourcePort = std::stoi(telemetrySource.substr(colon + 1));
 
         // Create UDP socket
         udpSocket = socket(AF_INET, SOCK_DGRAM, 0);
@@ -76,15 +77,49 @@ bool TelemetryForza7::configureTelemetry(ISimTelemetry* listener, std::string te
 void TelemetryForza7::udpReadLoop()
 {
     constexpr size_t bufferSize = 2048;
+    constexpr size_t forzaDashPacketSize = 324; // Forza 7 Dash packet size
     char buffer[bufferSize];
 
-    while (running) {
+    while (running) 
+    {
         ssize_t received = recvfrom(udpSocket, buffer, bufferSize, 0, nullptr, nullptr);
-        if (received > 0) 
+        if (received > 0 && received == forzaDashPacketSize) 
         {
-            // Process received data here
-            // Example: telemetryListener->onTelemetryData(buffer, received);
-        }
+            // Offsets in bytes (Dash format)
+            // - CurrentEngineRpm
+            constexpr size_t RPM_OFFSET   = 12;
+            // - Gear
+            constexpr size_t GEAR_OFFSET  = 312;
+            // - NormalizedAIBrakeDifference used as an indicator for ABS activation
+            // ABS is active if this value is non-zero
+            // This is a crude way to detect ABS activation as there is no direct ABS flag in Forza 7 telemetry
+            constexpr size_t ABS_OFFSET   = 315;
+
+            float rpm = readFloat(buffer, RPM_OFFSET);
+            uint8_t gear = readUint8_t(buffer, GEAR_OFFSET);
+            int8_t absVal = readInt8_t(buffer, ABS_OFFSET);
+
+            if(telemetryListener)
+            {
+                telemetryListener->updateRPM(rpm);
+                if(gear != lastGear)
+                {
+                    telemetryListener->updateGear(static_cast<int32_t>(gear));
+                    lastGear = gear;
+                }
+                bool absActive = (absVal != 0); // crude ABS detection
+                if(lastAbsState != absActive)
+                {
+                    telemetryListener->updateABS(absActive);
+                    lastAbsState = absActive;
+                }
+            }
+
+            std::cout << "RPM: " << rpm
+                    << " | Gear: " << (int)gear
+                    << " | ABS: " << absVal
+                    << "\n";        
+        }       
     }
 }
 
@@ -107,8 +142,19 @@ void TelemetryForza7::disconnect()
     telemetryListener = nullptr;
 }
 
-// Add this private method to the class definition in the header:
-// void TelemetryForza7::setTelemetryListener(ISimTelemetry* listener)
-// {
-//     telemetryListener = listener;
-// }
+
+
+float TelemetryForza7::readFloat(const char* buffer, size_t offset) {
+    float value;
+    std::memcpy(&value, buffer + offset, sizeof(float));
+    return value;
+}
+
+uint8_t TelemetryForza7::readUint8_t(const char* buffer, size_t offset) {
+    return static_cast<uint8_t>(buffer[offset]);
+}
+
+int8_t TelemetryForza7::readInt8_t(const char* buffer, size_t offset) {
+    return static_cast<int8_t>(buffer[offset]);
+}
+
