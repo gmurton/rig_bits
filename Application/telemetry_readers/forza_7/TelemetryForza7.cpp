@@ -4,6 +4,9 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
+#include <chrono>      // Add this for timing
+#include <thread>      // Already included in header, but needed for sleep
+#include <fcntl.h>     // Add this for fcntl
 
 // Constructor
 TelemetryForza7::TelemetryForza7()
@@ -65,6 +68,12 @@ bool TelemetryForza7::configureTelemetry(ISimTelemetry* listener, std::string te
             return false;
         }
 
+        // Make socket non-blocking
+        int flags = fcntl(udpSocket, F_GETFL, 0);
+        if (flags != -1) {
+            fcntl(udpSocket, F_SETFL, flags | O_NONBLOCK);
+        }
+
         running = true;
         readerThread = std::thread(&TelemetryForza7::udpReadLoop, this);
 
@@ -77,8 +86,11 @@ bool TelemetryForza7::configureTelemetry(ISimTelemetry* listener, std::string te
 void TelemetryForza7::udpReadLoop()
 {
     constexpr size_t bufferSize = 2048;
-    constexpr size_t forzaDashPacketSize = 324; // Forza 7 Dash packet size
+    constexpr size_t forzaDashPacketSize = 324;
     char buffer[bufferSize];
+
+    using clock = std::chrono::steady_clock;
+    auto lastHeartbeat = clock::now();
 
     while (running) 
     {
@@ -119,7 +131,26 @@ void TelemetryForza7::udpReadLoop()
                     << " | Gear: " << (int)gear
                     << " | ABS: " << absVal
                     << "\n";        
-        }       
+        }
+
+        // Heartbeat every second
+        auto now = clock::now();
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - lastHeartbeat).count() >= 1) {
+            std::cout << "[Heartbeat] TelemetryForza7 running..." << std::endl;
+            if (telemetryListener)
+            {
+                // TODO: Change the state based on actual telemetry state
+                // For now, we assume we are connected
+                telemetryListener->heartbeat(
+                    ISimTelemetry::TelemetryState::Connected, 
+                    std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count()
+                ); 
+            }
+            lastHeartbeat = now;
+        }
+
+        // Sleep a bit to avoid busy loop
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 }
 

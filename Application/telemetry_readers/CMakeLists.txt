@@ -48,11 +48,12 @@ if(CPPCHECK)
     # Only .hpp files for cppcheck
     file(GLOB_RECURSE COMMON_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/common/*.hpp")
     file(GLOB_RECURSE SPECIFIC_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/${SPECIFIC_SRC_DIR}/*.hpp")
-
+    # Currently ignoring missingIncludeSystem as it seems to not be of any real interest
     add_custom_target(run_cppcheck
         COMMAND ${CPPCHECK}
             --enable=all
             --inconclusive
+            --suppress=missingIncludeSystem
             --quiet
             --std=c++17
             --language=c++
