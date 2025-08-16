@@ -48,7 +48,10 @@ public:
     // Configure the telemetry reader with a data source 
     // e.g. a network address, uri or other identifier
     // Returns true if configuration was successful, false otherwise
-    virtual bool configureTelemetry(std::string telemetrySource) = 0;
+    virtual bool configureTelemetry(ISimTelemetry* listener, std::string telemetrySource) = 0;
+
+    // Disconnect from the telemetry source   
+    virtual void disconnect() = 0;
 
     // Add more configuration methods as needed
 };
